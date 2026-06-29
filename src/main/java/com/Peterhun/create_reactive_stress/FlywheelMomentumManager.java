@@ -17,8 +17,6 @@ import java.util.stream.Collectors;
  */
 public class FlywheelMomentumManager {
     private static final Logger LOGGER = LogManager.getLogger("Create_Reactive_Stress");
-    private static final float MOMENTUM_DRAIN_RATE = 0.02f; // Percentage of speed to drain per tick (2%)
-    private static final float SPEED_THRESHOLD = 0.1f; // Minimum speed before considering flywheel "dead"
 
     /**
      * Attempts to extract momentum from flywheels in the network to cover overstress.
@@ -29,8 +27,13 @@ public class FlywheelMomentumManager {
      * @return true if momentum extraction can handle the deficit, false if overstress occurs
      */
     public static boolean attemptMomentumExtraction(KineticNetwork network, float stressDeficit) {
-        if (stressDeficit <= 0) {
-            return true; // No deficit, all good
+        // Check if momentum extraction is enabled
+        if (!UtilityHelperClass.createReactiveStress$enableMomentumExtraction) {
+            return false;
+        }
+
+        if (stressDeficit <= UtilityHelperClass.createReactiveStress$stressDeficitThreshold) {
+            return true; // No significant deficit, all good
         }
 
         List<FlywheelBlockEntity> flywheels = findFlywheelsInNetwork(network);
@@ -46,8 +49,8 @@ public class FlywheelMomentumManager {
             return false; // Not enough momentum available
         }
 
-        // Extract momentum from the nearest flywheel (by network distance)
-        extractMomentumFromNearest(flywheels, stressDeficit);
+        // Extract momentum from the fastest flywheel
+        extractMomentumFromFastest(flywheels, stressDeficit);
         return true;
     }
 
@@ -76,8 +79,8 @@ public class FlywheelMomentumManager {
                 flywheels.add(flywheel);
             }
 
-            // Add connected neighbors to queue (simplified - would need proper connection checking)
-            // In a real implementation, use RotationPropagator.getConnectedNeighbours()
+            // In Create, network members are already the connected entities
+            // Additional traversal would use RotationPropagator, but network.members is sufficient
         }
 
         return flywheels;
@@ -95,9 +98,9 @@ public class FlywheelMomentumManager {
     }
 
     /**
-     * Extracts momentum from the nearest flywheel by gradually slowing it down.
+     * Extracts momentum from the fastest flywheel by gradually slowing it down.
      */
-    private static void extractMomentumFromNearest(List<FlywheelBlockEntity> flywheels, float stressDeficit) {
+    private static void extractMomentumFromFastest(List<FlywheelBlockEntity> flywheels, float stressDeficit) {
         if (flywheels.isEmpty()) {
             return;
         }
@@ -113,15 +116,15 @@ public class FlywheelMomentumManager {
         }
 
         float currentSpeed = primaryFlywheel.getTheoreticalSpeed();
-        float drainAmount = Math.min(
-                Math.abs(currentSpeed) * MOMENTUM_DRAIN_RATE,
-                stressDeficit / 100f // Conservative extraction
-        );
+        
+        // Calculate drain amount based on configured drain rate
+        float drainAmount = (float) (Math.abs(currentSpeed) * UtilityHelperClass.createReactiveStress$momentumDrainRate);
+        drainAmount = Math.min(drainAmount, stressDeficit / 100f); // Conservative extraction
 
         float newSpeed = currentSpeed > 0 ? currentSpeed - drainAmount : currentSpeed + drainAmount;
 
         // Clamp to minimum threshold
-        if (Math.abs(newSpeed) < SPEED_THRESHOLD) {
+        if (Math.abs(newSpeed) < UtilityHelperClass.createReactiveStress$speedThreshold) {
             newSpeed = 0;
         }
 
