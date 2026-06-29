@@ -1,6 +1,7 @@
 package com.Peterhun.create_reactive_stress.mixin;
 
 import com.Peterhun.create_reactive_stress.FlywheelMomentumManager;
+import com.Peterhun.create_reactive_stress.UtilityHelperClass;
 import com.simibubi.create.content.kinetics.KineticNetwork;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -21,30 +22,39 @@ public abstract class KineticNetworkMixin {
     @Shadow
     private float currentStress;
 
-    @Shadow
-    public abstract void updateStress();
-
     /**
      * Inject into updateNetwork to check for overstress conditions
      * and attempt momentum extraction before marking as overstressed.
      */
     @Inject(method = "updateNetwork", at = @At("HEAD"), cancellable = true)
     private void onUpdateNetwork(CallbackInfo ci) {
-        // Calculate stress deficit
+        // Only process if momentum extraction is enabled
+        if (!UtilityHelperClass.createReactiveStress$enableMomentumExtraction) {
+            return;
+        }
+
+        // Calculate stress deficit (how much over capacity we are)
         float deficit = currentStress - currentCapacity;
 
-        // If we're approaching overstress, try momentum extraction
-        if (deficit > 0.1f) {
+        // If we're approaching or exceeding capacity, try momentum extraction
+        if (deficit > UtilityHelperClass.createReactiveStress$stressDeficitThreshold) {
             KineticNetwork self = (KineticNetwork) (Object) this;
             
             // Attempt to extract momentum from flywheels
-            if (FlywheelMomentumManager.attemptMomentumExtraction(self, deficit)) {
-                // Momentum was extracted successfully, update stress again
-                updateStress();
-                // Continue normal execution
-                return;
+            boolean extracted = FlywheelMomentumManager.attemptMomentumExtraction(self, deficit);
+            
+            if (extracted) {
+                UtilityHelperClass.LOGGER.debug(
+                        "Momentum extraction successful for network {}. Deficit: {} stress units",
+                        self.id, deficit
+                );
+            } else {
+                UtilityHelperClass.LOGGER.debug(
+                        "Momentum extraction failed for network {}. Overstress will occur. Deficit: {} stress units",
+                        self.id, deficit
+                );
             }
-            // If momentum extraction failed, continue to normal overstress handling
+            // Continue to normal stress update logic
         }
     }
 }
